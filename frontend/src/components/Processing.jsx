@@ -31,8 +31,8 @@ function Processing({ taskId, youtubeUrl, targetLanguage, onComplete, onCancel }
     let timer;
     const checkStatus = async () => {
       try {
-        // Use Vite proxy — /translate proxies to http://localhost:8000
-        const response = await axios.get(`/translate/status/${taskId}`);
+        // Use Vite proxy — /api proxies to the backend
+        const response = await axios.get(`/api/translate/status/${taskId}`);
         const data = response.data;
 
         if (data.status === 'completed') {

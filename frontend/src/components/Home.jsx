@@ -96,7 +96,7 @@ function Home({ onStart, isAzureConfigured }) {
 
     setLoading(true);
     try {
-      const response = await axios.post(`/translate?blocking=false`, {
+      const response = await axios.post(`/api/translate?blocking=false`, {
         youtube_url: url.trim(),
         target_language: language,
       });

@@ -17,7 +17,7 @@ export function useConfig() {
   useEffect(() => {
     let cancelled = false;
     axios
-      .get('/config')
+      .get('/api/config')
       .then((res) => {
         if (!cancelled) {
           setConfig({
