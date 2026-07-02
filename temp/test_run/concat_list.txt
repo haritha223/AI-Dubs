@@ -1,0 +1,7 @@
+file 'C:/Users/Haritha/OneDrive/Desktop/AI yt dubbing/temp/test_run/sync_chunks/chunk_0_norm.wav'
+file 'C:/Users/Haritha/OneDrive/Desktop/AI yt dubbing/temp/test_run/sync_chunks/silence_1.wav'
+file 'C:/Users/Haritha/OneDrive/Desktop/AI yt dubbing/temp/test_run/sync_chunks/chunk_1_norm.wav'
+file 'C:/Users/Haritha/OneDrive/Desktop/AI yt dubbing/temp/test_run/sync_chunks/chunk_2_norm.wav'
+file 'C:/Users/Haritha/OneDrive/Desktop/AI yt dubbing/temp/test_run/sync_chunks/silence_3.wav'
+file 'C:/Users/Haritha/OneDrive/Desktop/AI yt dubbing/temp/test_run/sync_chunks/chunk_3_norm.wav'
+file 'C:/Users/Haritha/OneDrive/Desktop/AI yt dubbing/temp/test_run/sync_chunks/silence_trail.wav'

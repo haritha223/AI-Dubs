@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+yt-dlp
+transformers
+torch
+sentencepiece
+python-multipart
+openai-whisper
+ffmpeg-python
+moviepy
+pydantic-settings
+gTTS
+edge-tts
