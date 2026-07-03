@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
+import api from '../api';
 
 /**
  * Fetches the backend /config endpoint once on mount.
@@ -16,8 +16,8 @@ export function useConfig() {
 
   useEffect(() => {
     let cancelled = false;
-    axios
-      .get('/api/config')
+    api
+      .get('/config')
       .then((res) => {
         if (!cancelled) {
           setConfig({

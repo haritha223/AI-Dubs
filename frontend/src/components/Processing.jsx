@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import api from '../api';
 import { Loader2, CheckCircle2, Circle, AlertCircle, XCircle } from 'lucide-react';
 
 const STEPS = [
@@ -31,8 +31,8 @@ function Processing({ taskId, youtubeUrl, targetLanguage, onComplete, onCancel }
     let timer;
     const checkStatus = async () => {
       try {
-        // Use Vite proxy — /api proxies to the backend
-        const response = await axios.get(`/api/translate/status/${taskId}`);
+        // Use direct URL from api instance
+        const response = await api.get(`/translate/status/${taskId}`);
         const data = response.data;
 
         if (data.status === 'completed') {

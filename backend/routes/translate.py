@@ -3,7 +3,8 @@ import uuid
 import shutil
 import logging
 import asyncio
-from fastapi import APIRouter, BackgroundTasks, Request, HTTPException, Query
+import subprocess
+from fastapi import APIRouter, BackgroundTasks, Request, HTTPException, Query, UploadFile, File, Form
 from pydantic import BaseModel, HttpUrl
 from backend.config import settings
 from backend.services.downloader import download_youtube_video
@@ -45,7 +46,13 @@ def clean_temp_dir(task_id: str):
         except Exception as e:
             logger.warning(f"Failed to clean up temp dir {task_temp_dir}: {e}")
 
-async def run_dubbing_pipeline(task_id: str, youtube_url: str, target_language: str, base_url: str):
+async def run_dubbing_pipeline(
+    task_id: str,
+    target_language: str,
+    base_url: str,
+    youtube_url: str = None,
+    pre_downloaded_video: str = None,
+):
     """Executes the entire dubbing pipeline step-by-step."""
     task = tasks_db[task_id]
     task["status"] = "processing"
@@ -54,12 +61,25 @@ async def run_dubbing_pipeline(task_id: str, youtube_url: str, target_language: 
     os.makedirs(task_temp_dir, exist_ok=True)
     
     try:
-        # Step 1: Download Video & Extract Audio
+        # Step 1: Download Video & Extract Audio (or use pre-uploaded video)
         task["progress_step"] = "downloading"
-        logger.info(f"Task {task_id}: Downloading YouTube video...")
-        video_path, audio_path = await asyncio.to_thread(
-            download_youtube_video, youtube_url, task_temp_dir
-        )
+        audio_path = os.path.join(task_temp_dir, "audio.wav")
+
+        if pre_downloaded_video:
+            video_path = pre_downloaded_video
+            logger.info(f"Task {task_id}: Using pre-uploaded video, extracting audio...")
+            await asyncio.to_thread(
+                lambda: subprocess.run([
+                    'ffmpeg', '-y', '-i', video_path,
+                    '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1',
+                    audio_path
+                ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            )
+        else:
+            logger.info(f"Task {task_id}: Downloading YouTube video...")
+            video_path, audio_path = await asyncio.to_thread(
+                download_youtube_video, youtube_url, task_temp_dir
+            )
         
         # Step 2: Transcribe Speech-to-Text
         task["progress_step"] = "transcribing"
@@ -168,8 +188,7 @@ async def start_translation(
     base_url = str(request.base_url)
     
     if blocking:
-        # Run synchronously (blocking the request thread)
-        await run_dubbing_pipeline(task_id, body.youtube_url, body.target_language, base_url)
+        await run_dubbing_pipeline(task_id, body.target_language, base_url, youtube_url=body.youtube_url)
         task_data = tasks_db[task_id]
         if task_data["status"] == "failed":
             raise HTTPException(status_code=500, detail=task_data["error_message"])
@@ -180,15 +199,63 @@ async def start_translation(
             "status": "success"
         }
     else:
-        # Run asynchronously as a FastAPI Background Task
         background_tasks.add_task(
-            run_dubbing_pipeline, task_id, body.youtube_url, body.target_language, base_url
+            run_dubbing_pipeline, task_id, body.target_language, base_url, youtube_url=body.youtube_url
         )
         return {
             "task_id": task_id,
             "status": "queued",
             "message": "Translation task has been successfully scheduled in the background."
         }
+
+
+@router.post("/upload-translate")
+async def upload_translate(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    video: UploadFile = File(..., description="Video file to dub (mp4, mov, avi, mkv)"),
+    target_language: str = Form(..., description="Target dubbing language"),
+):
+    """
+    Accepts a local video file upload and starts the dubbing pipeline.
+    Skips the YouTube download step entirely — useful when YouTube blocks EC2 IPs.
+    """
+    task_id = str(uuid.uuid4())
+    task_temp_dir = os.path.join(settings.TEMP_DIR, task_id)
+    os.makedirs(task_temp_dir, exist_ok=True)
+
+    # Save uploaded video to temp dir
+    video_path = os.path.join(task_temp_dir, "video.mp4")
+    try:
+        with open(video_path, "wb") as f:
+            shutil.copyfileobj(video.file, f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save uploaded video: {e}")
+    finally:
+        await video.close()
+
+    # Register task
+    tasks_db[task_id] = {
+        "task_id": task_id,
+        "status": "queued",
+        "progress_step": "queued",
+        "error_message": "",
+        "original_transcript": [],
+        "translated_transcript": [],
+        "dubbed_video_url": "",
+        "original_video_url": "",
+        "original_audio_url": ""
+    }
+
+    base_url = str(request.base_url)
+    background_tasks.add_task(
+        run_dubbing_pipeline, task_id, target_language, base_url, pre_downloaded_video=video_path
+    )
+    return {
+        "task_id": task_id,
+        "status": "queued",
+        "message": "Upload received. Dubbing pipeline started."
+    }
 
 @router.get("/translate/status/{task_id}", response_model=TaskStatusResponse)
 async def get_task_status(task_id: str):
