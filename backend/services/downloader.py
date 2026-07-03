@@ -35,29 +35,29 @@ def download_youtube_video(url: str, output_dir: str) -> tuple[str, str]:
     # NOTE: Use a fully static output path ('video.mp4') to avoid [Errno 22]
     # Invalid argument on Windows — yt-dlp's default template embeds the video
     # title which may contain characters Windows rejects in filenames.
+    # Use cookies file if available
+    cookies_path = '/home/ubuntu/cookies.txt'
+    
     ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'format': 'best[ext=mp4]/best',
         # Static filename — avoids Windows [Errno 22] from special chars in title
         'outtmpl': os.path.join(output_dir, 'video.%(ext)s'),
         'merge_output_format': 'mp4',
         # Sanitize filenames for Windows (replaces forbidden characters)
         'windows_filenames': True,
-        'quiet': True,
-        'no_warnings': True,
-        'retries': 3,
+        'quiet': False,
+        'no_warnings': False,
+        'retries': 5,
         'socket_timeout': 30,
-        # NOTE: Do NOT use 'cookiesfrombrowser' — Chrome's cookie DB is locked
-        # while Chrome is running, causing a PermissionError on Windows.
+        # Use ios client — bypasses bot detection on server environments
         'extractor_args': {
             'youtube': {
-                'player_client': ['web', 'android'],
+                'player_client': ['ios', 'tv_embedded'],
             }
         },
         'http_headers': {
             'User-Agent': (
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                'AppleWebKit/537.36 (KHTML, like Gecko) '
-                'Chrome/125.0.0.0 Safari/537.36'
+                'com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X)'
             ),
         },
         'postprocessors': [{
@@ -65,6 +65,11 @@ def download_youtube_video(url: str, output_dir: str) -> tuple[str, str]:
             'preferedformat': 'mp4',
         }],
     }
+    
+    # Add cookies if file exists
+    if os.path.exists(cookies_path):
+        ydl_opts['cookiefile'] = cookies_path
+        logger.info(f"Using cookies from {cookies_path}")
     
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
