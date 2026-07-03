@@ -1,7 +1,7 @@
 import time
 import logging
 import torch
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 from backend.config import settings
 
 logger = logging.getLogger(__name__)
@@ -44,14 +44,13 @@ class NLLBTranslatorService:
         self.model_name = settings.NLLB_MODEL_NAME
         self.tokenizer = None
         self.model = None
-        self.pipeline = None
 
     def _load_model(self):
         """Lazy load tokenizer and model to conserve memory.
         Uses snapshot_download with up to 3 retries to handle network drops
         during the large (~2.4GB) NLLB-200 model download.
         """
-        if self.pipeline is not None:
+        if self.model is not None:
             return
 
         logger.info(f"Loading NLLB-200 model '{self.model_name}'...")
@@ -69,20 +68,15 @@ class NLLBTranslatorService:
                 )
                 logger.info(f"Model files ready at: {local_dir}")
 
-                device = 0 if torch.cuda.is_available() else -1
                 self.tokenizer = AutoTokenizer.from_pretrained(local_dir)
                 self.model = AutoModelForSeq2SeqLM.from_pretrained(
                     local_dir,
                     low_cpu_mem_usage=True
                 )
-                self.pipeline = pipeline(
-                    "translation",
-                    model=self.model,
-                    tokenizer=self.tokenizer,
-                    device=device,
-                    max_length=512
-                )
-                logger.info("NLLB-200 model loaded successfully.")
+                
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                self.model.to(device)
+                logger.info(f"NLLB-200 model loaded successfully on device: {device}")
                 return  # success — exit retry loop
 
             except Exception as e:
@@ -123,20 +117,37 @@ class NLLBTranslatorService:
             logger.warning(f"Unsupported target language: {target_lang_name}. Defaulting to English (eng_Latn).")
             tgt_lang = "eng_Latn"
 
-        logger.info(f"Translating from {src_lang} to {tgt_lang} using NLLB-200")
+        logger.info(f"Translating from {src_lang} to {tgt_lang} using NLLB-200 (directly)")
         
         # Extract text list for batch translation
         texts_to_translate = [seg["text"] for seg in segments]
         
         try:
-            # Batch translate
-            # NLLB-200 pipeline needs src_lang and tgt_lang parameters
-            translations = self.pipeline(
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            
+            # Set source language on tokenizer
+            self.tokenizer.src_lang = src_lang
+            
+            # Tokenize batch
+            inputs = self.tokenizer(
                 texts_to_translate,
-                src_lang=src_lang,
-                tgt_lang=tgt_lang,
-                batch_size=16
-            )
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+                max_length=512
+            ).to(device)
+            
+            # Generate translations
+            with torch.no_grad():
+                translated_tokens = self.model.generate(
+                    **inputs,
+                    forced_bos_token_id=self.tokenizer.lang_code_to_id[tgt_lang],
+                    max_length=512
+                )
+                
+            # Decode batch
+            translations = self.tokenizer.batch_decode(translated_tokens, skip_special_tokens=True)
+            
         except Exception as e:
             logger.error(f"NLLB batch translation failed: {e}")
             raise RuntimeError(f"Translation service failed: {e}")
@@ -144,7 +155,7 @@ class NLLBTranslatorService:
         # Construct translated segments preserving original index & timestamps
         translated_segments = []
         for i, seg in enumerate(segments):
-            translated_text = translations[i]["translation_text"] if i < len(translations) else ""
+            translated_text = translations[i] if i < len(translations) else ""
             translated_segments.append({
                 "start": seg["start"],
                 "end": seg["end"],
