@@ -33,7 +33,7 @@ app.add_middleware(
 )
 
 # Register routers
-app.include_router(translate_router, tags=["Translation & Dubbing"])
+app.include_router(translate_router, prefix="/api", tags=["Translation & Dubbing"])
 
 # Mount static folder for serving downloaded and dubbed assets when running locally
 logger.info(f"Mounting static files directory: {settings.LOCAL_STORAGE_DIR}")
