@@ -93,10 +93,42 @@ def _stream_url_to_file(download_url: str, video_path: str) -> bool:
 
 # ─── Download strategies ─────────────────────────────────────────────────────
 
+def _download_via_pytubefix(url: str, video_path: str, output_dir: str) -> bool:
+    """
+    Attempt download via pytubefix with OAuth (uses cached credentials).
+    """
+    try:
+        from pytubefix import YouTube
+        logger.info("Attempting download via pytubefix (OAuth)...")
+        
+        yt = YouTube(url, use_oauth=True, allow_oauth_cache=True)
+        # Try to get MP4 stream with video & audio combined (progressive)
+        stream = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').desc().first()
+        if not stream:
+            # Fallback to highest quality overall
+            stream = yt.streams.get_highest_resolution()
+            
+        if not stream:
+            logger.warning("pytubefix: no suitable stream found")
+            return False
+            
+        logger.info(f"Downloading stream: {stream.resolution} ({stream.mime_type})")
+        stream.download(output_path=output_dir, filename="video.mp4")
+        
+        # Verify download
+        if os.path.exists(video_path) and os.path.getsize(video_path) > 100_000:
+            logger.info("pytubefix download succeeded")
+            return True
+            
+        return False
+    except Exception as e:
+        logger.warning(f"pytubefix download failed: {e}")
+        return False
+
+
 def _download_via_invidious(url: str, video_path: str) -> bool:
     """
     Use a public Invidious instance to get a direct video stream URL.
-    Invidious acts as a YouTube proxy — no EC2 IP block.
     """
     video_id = _extract_video_id(url)
     if not video_id:
@@ -114,22 +146,19 @@ def _download_via_invidious(url: str, video_path: str) -> bool:
                 continue
 
             data = resp.json()
-            streams = data.get("formatStreams", [])  # combined audio+video
+            streams = data.get("formatStreams", [])
             adaptive = data.get("adaptiveFormats", [])
 
-            # Prefer combined streams (formatStreams) — they include both audio & video
             candidates = [f for f in streams if "video/mp4" in f.get("type", "")]
             if not candidates:
                 candidates = [f for f in streams if "video" in f.get("type", "")]
             if not candidates:
-                # Fall back to adaptive video streams
                 candidates = [f for f in adaptive if "video/mp4" in f.get("type", "") and "avc" in f.get("type", "")]
 
             if not candidates:
                 logger.warning(f"{instance}: no suitable stream found")
                 continue
 
-            # Pick highest quality
             def _quality_key(f):
                 q = f.get("quality", "0")
                 return int(re.sub(r'\D', '', q) or 0)
@@ -152,7 +181,7 @@ def _download_via_invidious(url: str, video_path: str) -> bool:
 
 
 def _download_via_cobalt(url: str, video_path: str) -> bool:
-    """Try cobalt.tools API (residential IP proxy for YouTube)."""
+    """Try cobalt.tools API."""
     try:
         clean_url = _clean_youtube_url(url)
         headers = {
@@ -183,7 +212,7 @@ def _download_via_cobalt(url: str, video_path: str) -> bool:
 
 
 def _download_via_ytdlp(url: str, output_dir: str) -> None:
-    """Last resort: yt-dlp with tv_embedded client (no PO token required)."""
+    """Last resort: yt-dlp with tv_embedded client."""
     clean_url = _clean_youtube_url(url)
     ydl_opts = {
         'format': 'best[ext=mp4]/best',
@@ -217,9 +246,10 @@ def download_youtube_video(url: str, output_dir: str) -> tuple[str, str]:
     Download a YouTube video and extract audio.
 
     Priority:
-      1. Invidious public instances (proxy, no IP block)
-      2. cobalt.tools API
-      3. yt-dlp with tv_embedded client
+      1. pytubefix (OAuth bypass)
+      2. Invidious public instances (proxy, no IP block)
+      3. cobalt.tools API
+      4. yt-dlp with tv_embedded client
 
     Returns:
         (video_path, audio_path)
@@ -237,13 +267,16 @@ def download_youtube_video(url: str, output_dir: str) -> tuple[str, str]:
 
     logger.info(f"Downloading: {url}")
 
-    # 1️⃣  Invidious
-    if _download_via_invidious(url, video_path):
+    # 1️⃣  pytubefix (Primary - uses cached OAuth login)
+    if _download_via_pytubefix(url, video_path, output_dir):
         pass
-    # 2️⃣  cobalt.tools
+    # 2️⃣  Invidious
+    elif _download_via_invidious(url, video_path):
+        pass
+    # 3️⃣  cobalt.tools
     elif _download_via_cobalt(url, video_path):
         pass
-    # 3️⃣  yt-dlp fallback
+    # 4️⃣  yt-dlp fallback
     else:
         logger.info("Proxy methods failed — falling back to yt-dlp")
         try:
