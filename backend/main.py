@@ -3,6 +3,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from backend.config import settings
 from backend.routes.translate import router as translate_router
 
@@ -44,13 +45,25 @@ os.makedirs(outputs_dir, exist_ok=True)
 logger.info(f"Mounting outputs directory: {outputs_dir}")
 app.mount("/outputs", StaticFiles(directory=outputs_dir), name="outputs")
 
-@app.get("/")
+@app.get("/health")
 def health_check():
     """Basic service health check."""
     return {
         "status": "healthy",
         "service": "AI YouTube Video Dubber & Translator API",
     }
+
+# Serve React frontend (must be LAST - catch-all for SPA routing)
+frontend_dist = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "dist"))
+if os.path.exists(frontend_dist):
+    app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dist, "assets")), name="frontend-assets")
+
+    @app.get("/")
+    @app.get("/{full_path:path}")
+    def serve_frontend(full_path: str = ""):
+        """Serve React SPA — return index.html for all unmatched routes."""
+        index = os.path.join(frontend_dist, "index.html")
+        return FileResponse(index)
 
 @app.get("/config")
 def get_config():
