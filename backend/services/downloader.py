@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 import logging
 import requests
@@ -8,6 +9,14 @@ logger = logging.getLogger(__name__)
 
 COBALT_API = "https://api.cobalt.tools/"
 COOKIES_PATH = '/home/ubuntu/cookies.txt'
+
+
+def _clean_youtube_url(url: str) -> str:
+    """Return a clean youtube.com/watch?v=ID URL, stripping tracking params."""
+    match = re.search(r'(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})', url)
+    if match:
+        return f'https://www.youtube.com/watch?v={match.group(1)}'
+    return url
 
 
 def _extract_audio(video_path: str, audio_path: str) -> None:
@@ -53,16 +62,14 @@ def _download_via_cobalt(url: str, video_path: str) -> bool:
     cobalt.tools runs on residential IPs — bypasses YouTube bot detection.
     """
     try:
+        clean_url = _clean_youtube_url(url)
         headers = {
             "Accept": "application/json",
             "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (compatible; AI-Dubs/1.0)",
         }
-        payload = {
-            "url": url,
-            "vQuality": "1080",
-            "filenameStyle": "basic",
-            "downloadMode": "auto",
-        }
+        # Minimal payload — only url is required by cobalt
+        payload = {"url": clean_url}
         logger.info("Attempting download via cobalt.tools API...")
         resp = requests.post(COBALT_API, json=payload, headers=headers, timeout=30)
         resp.raise_for_status()
@@ -100,19 +107,25 @@ def _download_via_cobalt(url: str, video_path: str) -> bool:
 
 
 def _download_via_ytdlp(url: str, output_dir: str) -> None:
-    """Fall back to yt-dlp (with cookies if available)."""
+    """
+    Fall back to yt-dlp.
+    Uses tv_embedded player client — this client does NOT require PO tokens
+    and works on server/datacenter IPs.
+    """
+    clean_url = _clean_youtube_url(url)
     ydl_opts = {
         'format': 'best[ext=mp4]/best',
         'outtmpl': os.path.join(output_dir, 'video.%(ext)s'),
         'merge_output_format': 'mp4',
-        'windows_filenames': True,
         'quiet': False,
         'no_warnings': False,
         'retries': 5,
-        'socket_timeout': 30,
+        'socket_timeout': 60,
+        # tv_embedded: server-safe client, no PO token required
         'extractor_args': {
             'youtube': {
-                'player_client': ['ios', 'web'],
+                'player_client': ['tv_embedded'],
+                'skip': ['dash', 'hls'],
             }
         },
         'postprocessors': [{
@@ -125,9 +138,9 @@ def _download_via_ytdlp(url: str, output_dir: str) -> None:
         ydl_opts['cookiefile'] = COOKIES_PATH
         logger.info(f"yt-dlp: using cookies from {COOKIES_PATH}")
 
-    logger.info("Attempting download via yt-dlp...")
+    logger.info("Attempting download via yt-dlp (tv_embedded client)...")
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([url])
+        ydl.download([clean_url])
 
 
 def download_youtube_video(url: str, output_dir: str) -> tuple[str, str]:
