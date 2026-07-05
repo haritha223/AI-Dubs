@@ -137,11 +137,17 @@ class NLLBTranslatorService:
                 max_length=512
             ).to(device)
             
+            # Get forced_bos_token_id
+            if hasattr(self.tokenizer, "lang_code_to_id"):
+                forced_bos_token_id = self.tokenizer.lang_code_to_id[tgt_lang]
+            else:
+                forced_bos_token_id = self.tokenizer.convert_tokens_to_ids(tgt_lang)
+
             # Generate translations
             with torch.no_grad():
                 translated_tokens = self.model.generate(
                     **inputs,
-                    forced_bos_token_id=self.tokenizer.lang_code_to_id[tgt_lang],
+                    forced_bos_token_id=forced_bos_token_id,
                     max_length=512
                 )
                 

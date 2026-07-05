@@ -14,6 +14,12 @@ class Settings(BaseSettings):
     AZURE_SPEECH_KEY: str = ""
     AZURE_SPEECH_REGION: str = ""
 
+    # AWS S3 Configuration
+    AWS_ACCESS_KEY_ID: str = ""
+    AWS_SECRET_ACCESS_KEY: str = ""
+    AWS_S3_BUCKET: str = ""
+    AWS_DEFAULT_REGION: str = "us-east-1"
+
     @property
     def is_azure_configured(self) -> bool:
         return bool(self.AZURE_SPEECH_KEY and self.AZURE_SPEECH_REGION)

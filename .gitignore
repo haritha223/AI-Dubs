@@ -1,0 +1,12 @@
+# Git ignore file for root directory
+.env
+node_modules/
+outputs/
+temp/
+static/
+__pycache__/
+*.pyc
+venv/
+.DS_Store
+*.log
+bin/

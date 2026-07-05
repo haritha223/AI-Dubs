@@ -126,19 +126,14 @@ async def run_dubbing_pipeline(
         task["progress_step"] = "uploading"
         logger.info(f"Task {task_id}: Uploading/saving generated assets...")
         
-        # Save assets locally in outputs/ and construct URLs
+        # Save assets (to S3 or locally) and get their URLs
         dubbed_video_name = f"{task_id}_{final_video_name}"
         original_video_name = f"{task_id}_original_video.mp4"
         original_audio_name = f"{task_id}_original_audio.wav"
         
-        await asyncio.to_thread(save_file, final_video_path, dubbed_video_name)
-        await asyncio.to_thread(save_file, video_path, original_video_name)
-        await asyncio.to_thread(save_file, audio_path, original_audio_name)
-        
-        cleaned_base = base_url.rstrip('/')
-        dubbed_video_url = f"{cleaned_base}/outputs/{dubbed_video_name}"
-        original_video_url = f"{cleaned_base}/outputs/{original_video_name}"
-        original_audio_url = f"{cleaned_base}/outputs/{original_audio_name}"
+        dubbed_video_url = await asyncio.to_thread(save_file, final_video_path, dubbed_video_name, base_url)
+        original_video_url = await asyncio.to_thread(save_file, video_path, original_video_name, base_url)
+        original_audio_url = await asyncio.to_thread(save_file, audio_path, original_audio_name, base_url)
         
         # Update task with final URLs
         task["dubbed_video_url"] = dubbed_video_url

@@ -10,3 +10,4 @@ moviepy
 pydantic-settings
 gTTS
 edge-tts
+boto3
