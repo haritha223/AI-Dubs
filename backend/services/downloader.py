@@ -218,36 +218,42 @@ def _download_via_cobalt(url: str, video_path: str) -> bool:
 
 
 def _download_via_ytdlp(url: str, output_dir: str) -> None:
-    """Download video with yt-dlp using cookies if available."""
+    """Download video with yt-dlp CLI using --remote-components ejs:github to bypass JS challenges."""
     clean_url = _clean_youtube_url(url)
     cookie_file = get_cookies_path()
-    
-    ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        'outtmpl': os.path.join(output_dir, 'video.%(ext)s'),
-        'merge_output_format': 'mp4',
-        'quiet': False,
-        'no_warnings': False,
-        'retries': 5,
-        'socket_timeout': 60,
-        'postprocessors': [{'key': 'FFmpegVideoConvertor', 'preferedformat': 'mp4'}],
-        'allow_remote_components': True,
-        'extractor_args': {
-            'youtube': {
-                'remote_components': ['ejs:github'],
-            }
-        }
-    }
+
+    # Use the venv yt-dlp binary path
+    ytdlp_bin = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'venv', 'bin', 'yt-dlp')
+    if not os.path.exists(ytdlp_bin):
+        ytdlp_bin = 'yt-dlp'  # Fallback to PATH
+
+    cmd = [
+        ytdlp_bin,
+        '--format', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        '--output', os.path.join(output_dir, 'video.%(ext)s'),
+        '--merge-output-format', 'mp4',
+        '--remote-components', 'ejs:github',
+        '--retries', '5',
+        '--socket-timeout', '60',
+        '--recode-video', 'mp4',
+    ]
 
     if cookie_file:
-        ydl_opts['cookiefile'] = cookie_file
+        cmd += ['--cookies', cookie_file]
         logger.info(f"yt-dlp: using cookies file at: {cookie_file}")
     else:
-        logger.warning("yt-dlp: Running without cookies (might fail on age-restricted videos)")
+        logger.warning("yt-dlp: Running without cookies")
 
-    logger.info(f"Trying yt-dlp download for {clean_url} with remote challenge solver...")
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([clean_url])
+    cmd.append(clean_url)
+
+    logger.info(f"Running yt-dlp CLI with remote JS challenge solver for: {clean_url}")
+    result = subprocess.run(cmd, capture_output=True, text=True)
+
+    if result.returncode != 0:
+        logger.error(f"yt-dlp CLI failed:\n{result.stderr}")
+        raise RuntimeError(f"Failed to download YouTube video: {result.stderr.strip().splitlines()[-1] if result.stderr else 'Unknown error'}")
+
+    logger.info(f"yt-dlp CLI download successful:\n{result.stdout[-500:] if result.stdout else ''}")
 
 
 # ─── Public API ─────────────────────────────────────────────────────────────
