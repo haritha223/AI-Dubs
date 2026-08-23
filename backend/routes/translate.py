@@ -258,3 +258,55 @@ async def get_task_status(task_id: str):
     if task_id not in tasks_db:
         raise HTTPException(status_code=404, detail="Task not found")
     return tasks_db[task_id]
+
+
+@router.get("/cookies/status")
+async def get_cookies_status():
+    """Checks whether a valid cookies.txt file is installed on the server."""
+    from backend.services.downloader import get_cookies_path
+    cookie_path = get_cookies_path()
+    if cookie_path and os.path.exists(cookie_path):
+        size = os.path.getsize(cookie_path)
+        return {
+            "has_cookies": True,
+            "path": cookie_path,
+            "size_bytes": size,
+            "message": "YouTube authentication cookies are active."
+        }
+    return {
+        "has_cookies": False,
+        "path": None,
+        "size_bytes": 0,
+        "message": "No YouTube cookies found. Please upload cookies.txt to bypass YouTube bot detection."
+    }
+
+
+@router.post("/cookies/upload")
+async def upload_cookies(file: UploadFile = File(..., description="cookies.txt exported from browser")):
+    """Uploads a cookies.txt file to authenticate YouTube downloads."""
+    if not file.filename.endswith(('.txt', '.cookie', '.cookies')):
+        raise HTTPException(status_code=400, detail="Please upload a valid .txt cookies file.")
+    
+    target_path = "/home/ubuntu/cookies.txt" if os.path.exists("/home/ubuntu") else os.path.join(os.getcwd(), "cookies.txt")
+    
+    try:
+        content = await file.read()
+        if len(content) < 10:
+            raise HTTPException(status_code=400, detail="The uploaded cookies file is empty.")
+            
+        with open(target_path, "wb") as f:
+            f.write(content)
+            
+        logger.info(f"Successfully saved YouTube cookies to {target_path} ({len(content)} bytes)")
+        return {
+            "success": True,
+            "message": f"YouTube cookies saved successfully to {target_path}",
+            "size_bytes": len(content)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to save cookies: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save cookies: {e}")
+    finally:
+        await file.close()

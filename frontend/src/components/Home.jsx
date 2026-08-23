@@ -17,6 +17,10 @@ import {
   Play,
   FileVideo,
   X,
+  ShieldCheck,
+  ShieldAlert,
+  Cookie,
+  CheckCircle2
 } from 'lucide-react';
 
 const LANGUAGES = [
@@ -72,12 +76,41 @@ function Home({ onStart, isAzureConfigured }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [mounted, setMounted] = useState(false);
+  const [hasCookies, setHasCookies] = useState(false);
+  const [cookieMsg, setCookieMsg] = useState('');
+  const [showCookieGuide, setShowCookieGuide] = useState(false);
   const fileInputRef = useRef(null);
+  const cookieInputRef = useRef(null);
 
   useEffect(() => {
     const t = setTimeout(() => setMounted(true), 50);
+    checkCookies();
     return () => clearTimeout(t);
   }, []);
+
+  const checkCookies = async () => {
+    try {
+      const res = await api.get('/cookies/status');
+      setHasCookies(res.data?.has_cookies || false);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleCookieUpload = async (file) => {
+    if (!file) return;
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await api.post('/cookies/upload', fd);
+      setHasCookies(true);
+      setCookieMsg('✓ YouTube cookies installed! All YouTube links will work now.');
+      setShowCookieGuide(false);
+      setTimeout(() => setCookieMsg(''), 6000);
+    } catch (err) {
+      setCookieMsg('❌ Failed to upload cookies: ' + (err.response?.data?.detail || err.message));
+    }
+  };
 
   const validateYoutubeUrl = (urlStr) => {
     const regExp = /^(?:https?:\/\/)?(?:m\.|www\.)?(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))((\w|-){11})(?:\S+)?$/;
@@ -266,6 +299,68 @@ function Home({ onStart, isAzureConfigured }) {
                     </button>
                   )}
                 </div>
+              </div>
+
+              {/* YouTube Bot Bypass / Cookies Banner */}
+              <div className="rounded-xl border border-slate-800/80 bg-slate-950/60 p-3 text-xs space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    {hasCookies ? (
+                      <span className="flex items-center gap-1.5 text-emerald-400 font-medium">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        YouTube Authentication Active (No Bot Blocks)
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1.5 text-amber-400 font-medium">
+                        <ShieldAlert className="w-3.5 h-3.5" />
+                        YouTube Bot Protection Bypass
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowCookieGuide(!showCookieGuide)}
+                    className="text-[11px] text-indigo-400 hover:text-indigo-300 font-medium underline cursor-pointer"
+                  >
+                    {showCookieGuide ? 'Hide Guide' : 'Setup cookies.txt (1-click)'}
+                  </button>
+                </div>
+
+                {cookieMsg && (
+                  <div className={`p-2 rounded-lg text-[11px] ${cookieMsg.startsWith('✓') ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20' : 'bg-red-500/10 text-red-300 border border-red-500/20'}`}>
+                    {cookieMsg}
+                  </div>
+                )}
+
+                {showCookieGuide && (
+                  <div className="space-y-2 pt-2 border-t border-slate-800/60 text-slate-400">
+                    <p className="text-[11px]">
+                      YouTube blocks AWS EC2 IPs with bot detection. Exporting your browser cookies allows 100% reliable URL downloads:
+                    </p>
+                    <ol className="list-decimal list-inside space-y-1 text-[11px] text-slate-300">
+                      <li>Install Chrome extension: <a href="https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbngbenkjcfflieahqdmikgl" target="_blank" rel="noreferrer" className="text-indigo-400 underline font-medium">Get cookies.txt LOCALLY</a></li>
+                      <li>Visit <a href="https://youtube.com" target="_blank" rel="noreferrer" className="text-indigo-400 underline font-medium">youtube.com</a> and click "Export" in the extension</li>
+                      <li>Upload the downloaded <code className="bg-slate-800 text-indigo-300 px-1 py-0.5 rounded">cookies.txt</code> below:</li>
+                    </ol>
+                    <div className="pt-1 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => cookieInputRef.current?.click()}
+                        className="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-xs transition cursor-pointer"
+                      >
+                        <Cookie className="w-3.5 h-3.5" />
+                        Upload cookies.txt
+                      </button>
+                      <input
+                        ref={cookieInputRef}
+                        type="file"
+                        accept=".txt,.cookie,.cookies"
+                        className="hidden"
+                        onChange={(e) => handleCookieUpload(e.target.files[0])}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Language */}

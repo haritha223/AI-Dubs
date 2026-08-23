@@ -5,9 +5,13 @@ import logging
 import requests
 import yt_dlp
 
-logger = logging.getLogger(__name__)
+def get_cookies_path() -> str | None:
+    for path in ['/home/ubuntu/cookies.txt', 'cookies.txt', os.path.join(os.getcwd(), 'cookies.txt')]:
+        if os.path.exists(path) and os.path.getsize(path) > 10:
+            return path
+    return None
 
-COOKIES_PATH = '/home/ubuntu/cookies.txt'
+COOKIES_PATH = get_cookies_path()
 
 # Public Invidious instances — these proxy YouTube and bypass IP blocks
 INVIDIOUS_INSTANCES = [
@@ -212,29 +216,33 @@ def _download_via_cobalt(url: str, video_path: str) -> bool:
 
 
 def _download_via_ytdlp(url: str, output_dir: str) -> None:
-    """Last resort: yt-dlp with tv_embedded client."""
+    """Download video with yt-dlp using cookies if available."""
     clean_url = _clean_youtube_url(url)
+    cookie_file = get_cookies_path()
+    
     ydl_opts = {
-        'format': 'best[ext=mp4]/best',
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         'outtmpl': os.path.join(output_dir, 'video.%(ext)s'),
         'merge_output_format': 'mp4',
         'quiet': False,
         'no_warnings': False,
-        'retries': 3,
+        'retries': 5,
         'socket_timeout': 60,
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['tv_embedded'],
-                'skip': ['dash', 'hls'],
-            }
-        },
         'postprocessors': [{'key': 'FFmpegVideoConvertor', 'preferedformat': 'mp4'}],
     }
-    if os.path.exists(COOKIES_PATH):
-        ydl_opts['cookiefile'] = COOKIES_PATH
-        logger.info(f"yt-dlp: using cookies from {COOKIES_PATH}")
 
-    logger.info("Trying yt-dlp (tv_embedded client)...")
+    if cookie_file:
+        ydl_opts['cookiefile'] = cookie_file
+        logger.info(f"yt-dlp: using cookies file at: {cookie_file}")
+    else:
+        # If no cookies file, try android client
+        ydl_opts['extractor_args'] = {
+            'youtube': {
+                'player_client': ['android', 'web'],
+            }
+        }
+
+    logger.info(f"Trying yt-dlp download for {clean_url}...")
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([clean_url])
 
