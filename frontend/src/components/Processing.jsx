@@ -47,8 +47,11 @@ function Processing({ taskId, youtubeUrl, targetLanguage, onComplete, onCancel }
         }
       } catch (err) {
         console.error('Error fetching task status:', err);
-        // We do not abort immediately to allow for transient network dropouts,
-        // but we show the error if it persists.
+        if (err.response?.status === 404) {
+          clearInterval(timer);
+          setErrorMsg('Task expired or server was updated. Please start a new dubbing task.');
+          setCurrentStep('failed');
+        }
       }
     };
 

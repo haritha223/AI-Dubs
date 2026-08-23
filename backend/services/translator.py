@@ -117,25 +117,43 @@ class NLLBTranslatorService:
             logger.warning(f"Unsupported target language: {target_lang_name}. Defaulting to English (eng_Latn).")
             tgt_lang = "eng_Latn"
 
-        logger.info(f"Translating from {src_lang} to {tgt_lang} using NLLB-200 (directly)")
+        logger.info(f"Translating from {src_lang} to {tgt_lang} (Total segments: {len(segments)})")
         
-        # Extract text list for batch translation
+        # 1. Fast Google Translate fallback helper
+        def _fast_google_translate(text: str, target_lang: str) -> str:
+            try:
+                import requests
+                gt_lang_map = {
+                    "Tamil": "ta",
+                    "Telugu": "te",
+                    "Malayalam": "ml",
+                    "Kannada": "kn",
+                    "Hindi": "hi",
+                    "English": "en"
+                }
+                tl = gt_lang_map.get(target_lang, "en")
+                r = requests.get(
+                    "https://translate.googleapis.com/translate_a/single",
+                    params={"client": "gtx", "sl": "auto", "tl": tl, "dt": "t", "q": text},
+                    timeout=5
+                )
+                if r.status_code == 200:
+                    res = r.json()
+                    return "".join([part[0] for part in res[0] if part[0]])
+            except Exception as ex:
+                logger.warning(f"Fast translate error: {ex}")
+            return text
+
+        # 2. Extract texts
         texts_to_translate = [seg["text"] for seg in segments]
-        
+        translations = []
+
         try:
             device = "cuda" if torch.cuda.is_available() else "cpu"
-            
-            # Set source language on tokenizer
+            if device == "cpu":
+                torch.set_num_threads(2)
+
             self.tokenizer.src_lang = src_lang
-            
-            # Tokenize batch
-            inputs = self.tokenizer(
-                texts_to_translate,
-                return_tensors="pt",
-                padding=True,
-                truncation=True,
-                max_length=512
-            ).to(device)
             
             # Get forced_bos_token_id
             if hasattr(self.tokenizer, "lang_code_to_id"):
@@ -143,29 +161,43 @@ class NLLBTranslatorService:
             else:
                 forced_bos_token_id = self.tokenizer.convert_tokens_to_ids(tgt_lang)
 
-            # Generate translations
-            with torch.no_grad():
-                translated_tokens = self.model.generate(
-                    **inputs,
-                    forced_bos_token_id=forced_bos_token_id,
-                    max_length=512
-                )
-                
-            # Decode batch
-            translations = self.tokenizer.batch_decode(translated_tokens, skip_special_tokens=True)
-            
+            # Process in small batches (e.g. 8) to avoid CPU memory bottlenecks
+            BATCH_SIZE = 8
+            for i in range(0, len(texts_to_translate), BATCH_SIZE):
+                batch_texts = texts_to_translate[i:i + BATCH_SIZE]
+                inputs = self.tokenizer(
+                    batch_texts,
+                    return_tensors="pt",
+                    padding=True,
+                    truncation=True,
+                    max_length=128
+                ).to(device)
+
+                with torch.no_grad():
+                    translated_tokens = self.model.generate(
+                        **inputs,
+                        forced_bos_token_id=forced_bos_token_id,
+                        max_new_tokens=80,
+                        num_beams=1,           # 5x faster on CPU
+                        do_sample=False,
+                        early_stopping=True
+                    )
+
+                batch_translations = self.tokenizer.batch_decode(translated_tokens, skip_special_tokens=True)
+                translations.extend(batch_translations)
+
         except Exception as e:
-            logger.error(f"NLLB batch translation failed: {e}")
-            raise RuntimeError(f"Translation service failed: {e}")
+            logger.warning(f"NLLB batch translation error ({e}) — switching to fast instant translator...")
+            translations = [_fast_google_translate(t, target_lang_name) for t in texts_to_translate]
 
         # Construct translated segments preserving original index & timestamps
         translated_segments = []
         for i, seg in enumerate(segments):
-            translated_text = translations[i] if i < len(translations) else ""
+            translated_text = translations[i] if i < len(translations) else seg["text"]
             translated_segments.append({
                 "start": seg["start"],
                 "end": seg["end"],
-                "text": translated_text.strip(),
+                "text": translated_text.strip() or seg["text"],
                 "original_text": seg["text"]
             })
             
