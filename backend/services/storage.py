@@ -39,9 +39,13 @@ def save_file(file_path: str, output_name: str, base_url: str = "") -> str:
                 ExtraArgs={"ContentType": content_type}
             )
             
-            region = settings.AWS_DEFAULT_REGION or "us-east-1"
-            s3_url = f"https://{settings.AWS_S3_BUCKET}.s3.{region}.amazonaws.com/{output_name}"
-            logger.info(f"Successfully uploaded to S3: {s3_url}")
+            # Generate a presigned URL valid for 7 days (604800s) for direct browser playback
+            s3_url = s3_client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": settings.AWS_S3_BUCKET, "Key": output_name},
+                ExpiresIn=604800
+            )
+            logger.info(f"Successfully uploaded to S3 with presigned URL: {output_name}")
             return s3_url
         except Exception as e:
             logger.error(f"Failed to upload to AWS S3: {e}. Falling back to local storage.")
