@@ -48,7 +48,7 @@ function App() {
             🎙️
           </div>
           <span className="font-bold text-xl tracking-tight shimmer-text">
-            Antigravity Dubs
+            AI Dubs
           </span>
         </div>
 
@@ -92,7 +92,7 @@ function App() {
       {/* ── Footer ─────────────────────────────────────────────── */}
       <footer className="border-t border-white/[0.04] bg-slate-950/30 px-6 py-4 text-center text-xs text-slate-500 relative z-10">
         © 2026{' '}
-        <span className="text-indigo-400 font-medium">Antigravity Dubs</span>.
+        <span className="text-indigo-400 font-medium">AI Dubs</span>.
         Built for seamless local & cloud video dubbing.
       </footer>
     </div>
