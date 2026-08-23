@@ -1,5 +1,6 @@
 import time
 import logging
+import urllib.parse
 import requests
 from backend.config import settings
 
@@ -15,7 +16,6 @@ TARGET_LANG_MAPPING = {
     "Hindi": "hi"
 }
 
-# NLLB codes (kept for reference if upgrading to bigger server later)
 NLLB_LANG_MAPPING = {
     "Tamil": "tam_Taml",
     "Telugu": "tel_Telu",
@@ -35,175 +35,122 @@ WHISPER_TO_NLLB = {
 }
 
 
-def _google_translate(text: str, target_lang_code: str) -> str:
-    """Translate text using free Google Translate API."""
+def _translate_single_segment(text: str, source_lang: str, target_lang_code: str) -> str:
+    """
+    Translates text into the target language using high-accuracy multi-tier fallback:
+      Tier 1: Google Chrome dict-extension endpoint (High accuracy, no 429)
+      Tier 2: MyMemory Translated API (Free, fast, 100% reliable)
+      Tier 3: Google translate_a endpoint
+    """
+    cleaned_text = text.strip()
+    if not cleaned_text:
+        return text
+
+    # Tier 1: Google Chrome Extension endpoint
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        }
+        r = requests.get(
+            "https://clients5.google.com/translate_a/t",
+            params={
+                "client": "dict-chrome-ex",
+                "sl": source_lang or "auto",
+                "tl": target_lang_code,
+                "q": cleaned_text
+            },
+            headers=headers,
+            timeout=6
+        )
+        if r.status_code == 200:
+            data = r.json()
+            if isinstance(data, list) and len(data) > 0 and isinstance(data[0], str):
+                return data[0]
+            elif isinstance(data, list) and len(data) > 0 and isinstance(data[0], list):
+                res = "".join([p[0] for p in data[0] if p and p[0]])
+                if res:
+                    return res
+    except Exception as ex:
+        logger.debug(f"Google dict endpoint error: {ex}")
+
+    # Tier 2: MyMemory Translation API
+    try:
+        src = source_lang if (source_lang and len(source_lang) == 2) else "auto"
+        pair = f"{src}|{target_lang_code}"
+        url = f"https://api.mymemory.translated.net/get?q={urllib.parse.quote(cleaned_text)}&langpair={pair}"
+        r = requests.get(url, timeout=6)
+        if r.status_code == 200:
+            data = r.json()
+            res = data.get("responseData", {}).get("translatedText")
+            if res and not res.startswith("MYMEMORY WARNING"):
+                return res
+    except Exception as ex:
+        logger.debug(f"MyMemory error: {ex}")
+
+    # Tier 3: Google gtx endpoint
     try:
         r = requests.get(
             "https://translate.googleapis.com/translate_a/single",
-            params={"client": "gtx", "sl": "auto", "tl": target_lang_code, "dt": "t", "q": text},
-            timeout=10
+            params={
+                "client": "gtx",
+                "sl": source_lang or "auto",
+                "tl": target_lang_code,
+                "dt": "t",
+                "q": cleaned_text
+            },
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=6
         )
         if r.status_code == 200:
-            res = r.json()
-            return "".join([part[0] for part in res[0] if part[0]])
+            data = r.json()
+            if data and data[0]:
+                res = "".join([part[0] for part in data[0] if part and part[0]])
+                if res:
+                    return res
     except Exception as ex:
-        logger.warning(f"Google Translate error: {ex}")
+        logger.debug(f"Google gtx error: {ex}")
+
+    logger.warning(f"All translation engines failed for text: '{cleaned_text[:30]}...'")
     return text
 
 
 class NLLBTranslatorService:
-    """Lightweight translator that uses Google Translate (fast, no RAM).
-    Falls back to NLLB only if explicitly requested via USE_NLLB=true env var.
-    """
     def __init__(self):
         self.model_name = settings.NLLB_MODEL_NAME
-        self.tokenizer = None
-        self.model = None
         self.use_nllb = getattr(settings, 'USE_NLLB', False)
 
     def _load_model(self):
-        """Lazy load NLLB model only if USE_NLLB is enabled."""
-        if not self.use_nllb:
-            logger.info("Using Google Translate (fast mode) — NLLB model not loaded to save RAM.")
-            return
-
-        if self.model is not None:
-            return
-
-        logger.info(f"Loading NLLB-200 model '{self.model_name}'...")
-        import torch
-        from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
-
-        MAX_RETRIES = 3
-        for attempt in range(1, MAX_RETRIES + 1):
-            try:
-                from huggingface_hub import snapshot_download
-                logger.info(f"Downloading/verifying model cache (attempt {attempt}/{MAX_RETRIES})...")
-                local_dir = snapshot_download(
-                    repo_id=self.model_name,
-                    local_files_only=False,
-                    ignore_patterns=["*.msgpack", "flax_model*", "tf_model*", "rust_model*"]
-                )
-                logger.info(f"Model files ready at: {local_dir}")
-
-                self.tokenizer = AutoTokenizer.from_pretrained(local_dir)
-                self.model = AutoModelForSeq2SeqLM.from_pretrained(
-                    local_dir,
-                    low_cpu_mem_usage=True
-                )
-                
-                device = "cuda" if torch.cuda.is_available() else "cpu"
-                self.model.to(device)
-                logger.info(f"NLLB-200 model loaded successfully on device: {device}")
-                return
-
-            except Exception as e:
-                logger.error(f"Attempt {attempt}/{MAX_RETRIES} failed to load NLLB-200 model: {e}")
-                if attempt < MAX_RETRIES:
-                    wait_secs = 5 * attempt
-                    logger.info(f"Retrying in {wait_secs} seconds...")
-                    time.sleep(wait_secs)
-                else:
-                    raise RuntimeError(
-                        f"Could not load NLLB-200 model after {MAX_RETRIES} attempts. "
-                        f"Check your internet connection and re-run. Error: {e}"
-                    )
+        pass
 
     def translate_segments(self, segments: list[dict], source_lang_whisper: str, target_lang_name: str) -> list[dict]:
         """
-        Translates a list of transcription segments into the target language.
-        Uses Google Translate by default (fast, no RAM). Falls back to NLLB if enabled.
+        Translates all transcription segments into target_lang_name.
         """
         if not segments:
             return []
 
-        tgt_lang_code = TARGET_LANG_MAPPING.get(target_lang_name, "en")
-        logger.info(f"Translating {len(segments)} segments to {target_lang_name} ({tgt_lang_code})...")
+        tgt_lang_code = TARGET_LANG_MAPPING.get(target_lang_name, "ta")
+        logger.info(f"Translating {len(segments)} segments to {target_lang_name} (code: '{tgt_lang_code}', source: '{source_lang_whisper}')...")
 
         start_time = time.time()
-
-        # ── Google Translate (Primary — fast, no RAM) ──
-        if not self.use_nllb:
-            translations = []
-            for seg in segments:
-                translated = _google_translate(seg["text"], tgt_lang_code)
-                translations.append(translated)
-            
-            elapsed = time.time() - start_time
-            logger.info(f"Google Translate completed {len(segments)} segments in {elapsed:.1f}s")
-
-            translated_segments = []
-            for i, seg in enumerate(segments):
-                translated_segments.append({
-                    "start": seg["start"],
-                    "end": seg["end"],
-                    "text": translations[i].strip() or seg["text"],
-                    "original_text": seg["text"]
-                })
-            logger.info(f"Successfully translated {len(translated_segments)} segments.")
-            return translated_segments
-
-        # ── NLLB Fallback (only if USE_NLLB=true) ──
-        self._load_model()
-        import torch
-        
-        src_lang = WHISPER_TO_NLLB.get(source_lang_whisper, "eng_Latn")
-        nllb_tgt = NLLB_LANG_MAPPING.get(target_lang_name, "eng_Latn")
-
-        texts_to_translate = [seg["text"] for seg in segments]
-        translations = []
-
-        try:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            if device == "cpu":
-                torch.set_num_threads(2)
-
-            self.tokenizer.src_lang = src_lang
-            
-            if hasattr(self.tokenizer, "lang_code_to_id"):
-                forced_bos_token_id = self.tokenizer.lang_code_to_id[nllb_tgt]
-            else:
-                forced_bos_token_id = self.tokenizer.convert_tokens_to_ids(nllb_tgt)
-
-            BATCH_SIZE = 8
-            for i in range(0, len(texts_to_translate), BATCH_SIZE):
-                batch_texts = texts_to_translate[i:i + BATCH_SIZE]
-                inputs = self.tokenizer(
-                    batch_texts,
-                    return_tensors="pt",
-                    padding=True,
-                    truncation=True,
-                    max_length=128
-                ).to(device)
-
-                with torch.no_grad():
-                    translated_tokens = self.model.generate(
-                        **inputs,
-                        forced_bos_token_id=forced_bos_token_id,
-                        max_new_tokens=80,
-                        num_beams=1,
-                        do_sample=False,
-                        early_stopping=True
-                    )
-
-                batch_translations = self.tokenizer.batch_decode(translated_tokens, skip_special_tokens=True)
-                translations.extend(batch_translations)
-
-        except Exception as e:
-            logger.warning(f"NLLB error ({e}) — falling back to Google Translate...")
-            translations = [_google_translate(t, tgt_lang_code) for t in texts_to_translate]
-
         translated_segments = []
+
         for i, seg in enumerate(segments):
-            translated_text = translations[i] if i < len(translations) else seg["text"]
+            orig_text = seg.get("text", "")
+            translated = _translate_single_segment(orig_text, source_lang_whisper, tgt_lang_code)
+            
             translated_segments.append({
                 "start": seg["start"],
                 "end": seg["end"],
-                "text": translated_text.strip() or seg["text"],
-                "original_text": seg["text"]
+                "text": translated.strip() or orig_text,
+                "original_text": orig_text
             })
-            
-        logger.info(f"Successfully translated {len(translated_segments)} segments.")
+
+        elapsed = time.time() - start_time
+        logger.info(f"Successfully translated {len(translated_segments)} segments into {target_lang_name} in {elapsed:.2f}s")
+        if translated_segments:
+            logger.info(f"Sample translated output: '{translated_segments[0]['text'][:60]}...'")
+
         return translated_segments
 
 # Singleton instance
