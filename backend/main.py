@@ -1,5 +1,6 @@
 import os
 import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -17,10 +18,40 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Preload heavy ML models at server startup so the first request is fast."""
+    logger.info("=== Server startup: preloading ML models ===")
+
+    # Preload Whisper model
+    try:
+        import whisper
+        logger.info(f"Preloading Whisper model '{settings.WHISPER_MODEL_NAME}'...")
+        app.state.whisper_model = whisper.load_model(settings.WHISPER_MODEL_NAME)
+        logger.info("✓ Whisper model loaded")
+    except Exception as e:
+        logger.warning(f"Could not preload Whisper model: {e}")
+        app.state.whisper_model = None
+
+    # Preload NLLB-200 translation model
+    try:
+        from backend.services.translator import translator_service
+        logger.info(f"Preloading NLLB-200 model '{settings.NLLB_MODEL_NAME}'...")
+        translator_service._load_model()
+        logger.info("✓ NLLB-200 model loaded")
+    except Exception as e:
+        logger.warning(f"Could not preload NLLB-200 model: {e}")
+
+    logger.info("=== All models ready — server is accepting requests ===")
+    yield
+    # Shutdown
+    logger.info("Server shutting down.")
+
 app = FastAPI(
     title="AI YouTube Video Dubber & Translator API",
     description="Modular system translating YouTube videos via speech-to-text, NLLB-200 translation, AWS Polly TTS, and FFmpeg video merging.",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # Enable CORS for frontend integration
