@@ -33,12 +33,15 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Could not preload Whisper model: {e}")
         app.state.whisper_model = None
 
-    # Preload NLLB-200 translation model
+    # Preload NLLB-200 translation model (only if USE_NLLB is enabled)
     try:
         from backend.services.translator import translator_service
-        logger.info(f"Preloading NLLB-200 model '{settings.NLLB_MODEL_NAME}'...")
-        translator_service._load_model()
-        logger.info("✓ NLLB-200 model loaded")
+        if translator_service.use_nllb:
+            logger.info(f"Preloading NLLB-200 model '{settings.NLLB_MODEL_NAME}'...")
+            translator_service._load_model()
+            logger.info("✓ NLLB-200 model loaded")
+        else:
+            logger.info("✓ Using Google Translate (fast mode) — NLLB model skipped to save RAM")
     except Exception as e:
         logger.warning(f"Could not preload NLLB-200 model: {e}")
 
