@@ -231,20 +231,21 @@ def _download_via_ytdlp(url: str, output_dir: str) -> None:
         'retries': 5,
         'socket_timeout': 60,
         'postprocessors': [{'key': 'FFmpegVideoConvertor', 'preferedformat': 'mp4'}],
+        'allow_remote_components': True,
+        'extractor_args': {
+            'youtube': {
+                'remote_components': ['ejs:github'],
+            }
+        }
     }
 
     if cookie_file:
         ydl_opts['cookiefile'] = cookie_file
         logger.info(f"yt-dlp: using cookies file at: {cookie_file}")
     else:
-        # If no cookies file, try android client
-        ydl_opts['extractor_args'] = {
-            'youtube': {
-                'player_client': ['android', 'web'],
-            }
-        }
+        logger.warning("yt-dlp: Running without cookies (might fail on age-restricted videos)")
 
-    logger.info(f"Trying yt-dlp download for {clean_url}...")
+    logger.info(f"Trying yt-dlp download for {clean_url} with remote challenge solver...")
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([clean_url])
 
