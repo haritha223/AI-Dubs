@@ -5,6 +5,8 @@ import logging
 import requests
 import yt_dlp
 
+logger = logging.getLogger(__name__)
+
 def get_cookies_path() -> str | None:
     for path in ['/home/ubuntu/cookies.txt', 'cookies.txt', os.path.join(os.getcwd(), 'cookies.txt')]:
         if os.path.exists(path) and os.path.getsize(path) > 10:
